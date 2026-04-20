@@ -26,6 +26,7 @@ export default function AuthScreen({ onLogin }) {
   const [username, setUser] = useState("");
   const [password, setPass] = useState("");
   const [email, setEmail]   = useState("");
+  const [role, setRole]     = useState("user");
   const [error, setError]   = useState("");
   const [loading, setLoad]  = useState(false);
 
@@ -36,7 +37,7 @@ export default function AuthScreen({ onLogin }) {
       const endpoint = mode === "login" ? "/auth/login" : "/auth/register";
       const body = mode === "login"
         ? { username, password }
-        : { username, password, email };
+        : { username, password, email, role };
       const data = await apiFetch(endpoint, {
         method: "POST",
         body: JSON.stringify(body),
@@ -60,10 +61,10 @@ export default function AuthScreen({ onLogin }) {
 
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "#0ea5e9", letterSpacing: "0.1em" }}>
+          <div style={{ fontSize: 31, fontWeight: 700, color: "#0ea5e9", letterSpacing: "0.1em" }}>
             ◈ CLOUDCARBON
           </div>
-          <div style={{ fontSize: 10, color: "#475569", letterSpacing: "0.2em", marginTop: 6 }}>
+          <div style={{ fontSize: 13, color: "#475569", letterSpacing: "0.2em", marginTop: 6 }}>
             SUSTAINABLE CLOUD INFRASTRUCTURE TERMINAL
           </div>
         </div>
@@ -88,7 +89,7 @@ export default function AuthScreen({ onLogin }) {
                 flex: 1, background: "none", border: "none",
                 color: mode === m ? "#0ea5e9" : "#475569",
                 fontFamily: "'Courier New', monospace",
-                fontSize: 10, letterSpacing: "0.15em",
+                fontSize: 13, letterSpacing: "0.15em",
                 textTransform: "uppercase", padding: "8px 0",
                 cursor: "pointer",
                 borderBottom: `2px solid ${mode === m ? "#0ea5e9" : "transparent"}`,
@@ -102,43 +103,57 @@ export default function AuthScreen({ onLogin }) {
           {/* Form */}
           <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div>
-              <label style={{ fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#475569", marginBottom: 5, display: "block" }}>
+              <label style={{ fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", color: "#475569", marginBottom: 5, display: "block" }}>
                 Username
               </label>
               <input
                 value={username} onChange={e => setUser(e.target.value)}
                 placeholder="Enter username" required
-                style={{ width: "100%", background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#e2e8f0", padding: "10px 14px", borderRadius: 4, fontFamily: "'Courier New', monospace", fontSize: 12, outline: "none" }}
+                style={{ width: "100%", background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#e2e8f0", padding: "10px 14px", borderRadius: 4, fontFamily: "'Courier New', monospace", fontSize: 15, outline: "none" }}
               />
             </div>
 
             {mode === "register" && (
-              <div>
-                <label style={{ fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#475569", marginBottom: 5, display: "block" }}>
-                  Email (optional)
-                </label>
-                <input
-                  type="email" value={email} onChange={e => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  style={{ width: "100%", background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#e2e8f0", padding: "10px 14px", borderRadius: 4, fontFamily: "'Courier New', monospace", fontSize: 12, outline: "none" }}
-                />
-              </div>
+              <>
+                <div>
+                  <label style={{ fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", color: "#475569", marginBottom: 5, display: "block" }}>
+                    Email (optional)
+                  </label>
+                  <input
+                    type="email" value={email} onChange={e => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    style={{ width: "100%", background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#e2e8f0", padding: "10px 14px", borderRadius: 4, fontFamily: "'Courier New', monospace", fontSize: 15, outline: "none" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", color: "#475569", marginBottom: 5, display: "block" }}>
+                    Account Role
+                  </label>
+                  <select
+                    value={role} onChange={e => setRole(e.target.value)}
+                    style={{ width: "100%", background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#e2e8f0", padding: "10px 14px", borderRadius: 4, fontFamily: "'Courier New', monospace", fontSize: 15, outline: "none" }}
+                  >
+                    <option value="user">Normal User</option>
+                    <option value="admin">Administrator</option>
+                  </select>
+                </div>
+              </>
             )}
 
             <div>
-              <label style={{ fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#475569", marginBottom: 5, display: "block" }}>
+              <label style={{ fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", color: "#475569", marginBottom: 5, display: "block" }}>
                 Password
               </label>
               <input
                 type="password" value={password} onChange={e => setPass(e.target.value)}
                 placeholder={mode === "register" ? "Min 6 characters" : "Enter password"}
                 required
-                style={{ width: "100%", background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#e2e8f0", padding: "10px 14px", borderRadius: 4, fontFamily: "'Courier New', monospace", fontSize: 12, outline: "none" }}
+                style={{ width: "100%", background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#e2e8f0", padding: "10px 14px", borderRadius: 4, fontFamily: "'Courier New', monospace", fontSize: 15, outline: "none" }}
               />
             </div>
 
             {error && (
-              <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, padding: "10px 14px", fontSize: 11, color: "#ef4444" }}>
+              <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, padding: "10px 14px", fontSize: 14, color: "#ef4444" }}>
                 ⚠ {error}
               </div>
             )}
@@ -146,7 +161,7 @@ export default function AuthScreen({ onLogin }) {
             <button type="submit" disabled={loading} style={{
               background: loading ? "#1e3a5f" : "#0ea5e9",
               border: "none", color: loading ? "#475569" : "#000",
-              fontWeight: 700, fontSize: 12, padding: "12px",
+              fontWeight: 700, fontSize: 15, padding: "12px",
               borderRadius: 4, cursor: loading ? "not-allowed" : "pointer",
               fontFamily: "'Courier New', monospace",
               letterSpacing: "0.05em", marginTop: 4,
@@ -158,10 +173,10 @@ export default function AuthScreen({ onLogin }) {
           {/* Demo credentials */}
           {mode === "login" && (
             <div style={{ marginTop: 20, padding: "12px 14px", background: "#0b1a2e", borderRadius: 4 }}>
-              <div style={{ fontSize: 9, color: "#475569", marginBottom: 4, letterSpacing: "0.1em" }}>
+              <div style={{ fontSize: 12, color: "#475569", marginBottom: 4, letterSpacing: "0.1em" }}>
                 DEMO CREDENTIALS
               </div>
-              <div style={{ fontSize: 10, color: "#64748b" }}>
+              <div style={{ fontSize: 13, color: "#64748b" }}>
                 Username: <span style={{ color: "#e2e8f0" }}>demo</span>
                 &nbsp;·&nbsp;
                 Password: <span style={{ color: "#e2e8f0" }}>demo123</span>
@@ -170,7 +185,7 @@ export default function AuthScreen({ onLogin }) {
           )}
         </div>
 
-        <div style={{ textAlign: "center", marginTop: 16, fontSize: 9, color: "#475569", letterSpacing: "0.1em" }}>
+        <div style={{ textAlign: "center", marginTop: 16, fontSize: 12, color: "#475569", letterSpacing: "0.1em" }}>
           HOSTED ON AWS EC2 · SUSTAINABLE CLOUD INITIATIVE
         </div>
       </div>

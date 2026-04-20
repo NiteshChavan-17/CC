@@ -194,10 +194,10 @@ function Ticker({ items }) {
     <div style={{ overflow: "hidden", whiteSpace: "nowrap", flex: 1 }}>
       <div ref={trackRef} style={{ display: "inline-block", transform: `translateX(-${offset}px)` }}>
         {[...items, ...items].map((item, i) => (
-          <span key={i} style={{ marginRight: 40, fontSize: 11, fontFamily: "monospace" }}>
+          <span key={i} style={{ marginRight: 40, fontSize: 14, fontFamily: "monospace" }}>
             <span style={{ color: "#64748b", marginRight: 6 }}>{item.label}</span>
             <span style={{ color: item.up ? "#22c55e" : "#ef4444", fontWeight: 700 }}>{item.value}</span>
-            <span style={{ color: item.up ? "#22c55e" : "#ef4444", marginLeft: 4, fontSize: 10 }}>
+            <span style={{ color: item.up ? "#22c55e" : "#ef4444", marginLeft: 4, fontSize: 13 }}>
               {item.up ? "▲" : "▼"}{item.change}
             </span>
           </span>
@@ -246,9 +246,9 @@ function MetricCard({ label, value, sub, color = "#22c55e", blink }) {
       padding: "10px 14px", transition: "background 0.3s",
       backgroundColor: flash ? "#0f2a1a" : "#0b1a2e",
     }}>
-      <div style={{ fontSize: 9, letterSpacing: "0.15em", textTransform: "uppercase", color: "#475569", marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color, fontFamily: "monospace", lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, color: "#475569", marginTop: 3 }}>{sub}</div>}
+      <div style={{ fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", color: "#475569", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 23, fontWeight: 700, color, fontFamily: "monospace", lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 13, color: "#475569", marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
@@ -256,7 +256,7 @@ function MetricCard({ label, value, sub, color = "#22c55e", blink }) {
 function EmissionBar({ label, value, max, color }) {
   return (
     <div style={{ marginBottom: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#64748b", marginBottom: 3 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#64748b", marginBottom: 3 }}>
         <span>{label}</span>
         <span style={{ color, fontFamily: "monospace" }}>{value} gCO₂/kWh</span>
       </div>
@@ -308,6 +308,152 @@ function RealtimeChart({ data }) {
   }, [data]);
 
   return <canvas ref={canvasRef} />;
+}
+
+function UserHistoryPanel() {
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    apiFetch("/analyses").then(d => setHistory(d.analyses)).finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div style={{ background: "#0b1a2e", border: "1px solid #1e3a5f", borderRadius: 4, padding: 16, marginTop: 10 }}>
+      <div style={{ fontSize: 12, letterSpacing: "0.2em", color: "#0ea5e9", marginBottom: 12, textTransform: "uppercase" }}>
+        YOUR RECENT ANALYSES
+      </div>
+      {loading ? <div style={{ fontSize: 13, color: "#475569" }}>Loading history...</div> : (
+        <div style={{ maxHeight: 150, overflowY: "auto" }}>
+          <table style={{ width: "100%", fontSize: 12, textAlign: "left", color: "#94a3b8" }}>
+            <tbody>
+              {history.slice(0, 15).map((h, i) => (
+                <tr key={h.id || i} style={{ borderBottom: "1px solid #1e293b" }}>
+                  <td style={{ padding: "4px 0", color: "#e2e8f0" }}>{h.url.replace(/^https?:\/\//, '').substring(0, 25)}</td>
+                  <td>Grade {h.grade}</td>
+                  <td style={{ color: h.is_green ? "#22c55e" : "#475569" }}>{h.is_green ? "GREEN" : "STD"}</td>
+                  <td style={{ textAlign: "right" }}>{new Date(h.analyzed_at).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!history.length && <div style={{ fontSize: 12, color: "#475569" }}>No analyses yet. Start exploring above!</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminPanel({ user }) {
+  const [tab, setTab] = useState("stats");
+  const [adminData, setAdminData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    const path = tab === "stats" ? "/admin/stats" : "/admin/users";
+    apiFetch(path).then(setAdminData).finally(() => setLoading(false));
+  }, [tab]);
+
+  async function toggleRole(u) {
+    const newRole = u.role === 'admin' ? 'user' : 'admin';
+    if (!window.confirm(`Change ${u.username}'s role to ${newRole.toUpperCase()}?`)) return;
+    try {
+      await apiFetch(`/admin/users/${u.id}/role`, { method: "PATCH", body: JSON.stringify({ role: newRole }) });
+      setAdminData(prev => ({ ...prev, users: prev.users.map(x => x.id === u.id ? { ...x, role: newRole } : x) }));
+    } catch (e) { alert(e.message); }
+  }
+
+  async function deleteUser(u) {
+    if (!window.confirm(`Danger: Permanently delete user ${u.username} and all their data?`)) return;
+    try {
+      await apiFetch(`/admin/users/${u.id}`, { method: "DELETE" });
+      setAdminData(prev => ({ ...prev, users: prev.users.filter(x => x.id !== u.id) }));
+    } catch (e) { alert(e.message); }
+  }
+
+  return (
+    <div style={{ background: "#1f0909", border: "1px solid #5f1e1e", borderRadius: 4, padding: 16, marginTop: 10 }}>
+      <div style={{ fontSize: 12, letterSpacing: "0.2em", color: "#f87171", marginBottom: 12, textTransform: "uppercase", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>ADMINISTRATOR CONSOLE</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setTab("stats")} style={{ background: tab === "stats" ? "#5f1e1e" : "transparent", color: tab === "stats" ? "#fff" : "#fca5a5", border: "1px solid #5f1e1e", padding: "4px 8px", fontSize: 12, cursor: "pointer", borderRadius: 2 }}>GLOBAL STATS</button>
+          <button onClick={() => setTab("users")} style={{ background: tab === "users" ? "#5f1e1e" : "transparent", color: tab === "users" ? "#fff" : "#fca5a5", border: "1px solid #5f1e1e", padding: "4px 8px", fontSize: 12, cursor: "pointer", borderRadius: 2 }}>MANAGE USERS</button>
+        </div>
+      </div>
+      
+      {loading ? <div style={{ fontSize: 13, color: "#991b1b" }}>Loading {tab}...</div> : (
+        <>
+          {tab === "stats" && adminData && adminData.usersCount !== undefined && (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                <div style={{ background: "#3f1111", padding: 10, borderRadius: 4, textAlign: "center" }}>
+                  <div style={{ fontSize: 19, color: "#fca5a5", fontWeight: "bold" }}>{adminData.usersCount}</div>
+                  <div style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>TOTAL USERS</div>
+                </div>
+                <div style={{ background: "#3f1111", padding: 10, borderRadius: 4, textAlign: "center" }}>
+                  <div style={{ fontSize: 19, color: "#fca5a5", fontWeight: "bold" }}>{adminData.analysesCount}</div>
+                  <div style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>ANALYSES RUN</div>
+                </div>
+                <div style={{ background: "#3f1111", padding: 10, borderRadius: 4, textAlign: "center" }}>
+                  <div style={{ fontSize: 19, color: "#fca5a5", fontWeight: "bold" }}>{adminData.totalCo2.toFixed(1)}kg</div>
+                  <div style={{ fontSize: 11, color: "#f87171", marginTop: 4 }}>GLOBAL EMISSIONS</div>
+                </div>
+              </div>
+              
+              <div style={{ fontSize: 12, color: "#f87171", marginBottom: 6 }}>RECENT SYSTEM ACTIVITY (ALL USERS)</div>
+              <div style={{ maxHeight: 110, overflowY: "auto" }}>
+                <table style={{ width: "100%", fontSize: 12, textAlign: "left", color: "#fca5a5" }}>
+                  <tbody>
+                    {adminData.recent?.map((r, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid #3f1111" }}>
+                        <td style={{ padding: "4px 0", color: "#fff" }}>@{r.username}</td>
+                        <td>{r.url.replace(/^https?:\/\//, '').substring(0, 18)}</td>
+                        <td>Grade {r.grade}</td>
+                        <td style={{ textAlign: "right", color: "#ca8a8a" }}>{new Date(r.analyzed_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!adminData.recent?.length && <div style={{ fontSize: 12, color: "#991b1b" }}>No recent activity.</div>}
+              </div>
+            </div>
+          )}
+
+          {tab === "users" && adminData && adminData.users && (
+            <div style={{ maxHeight: 200, overflowY: "auto" }}>
+              <table style={{ width: "100%", fontSize: 12, textAlign: "left", color: "#fca5a5" }}>
+                <thead>
+                  <tr style={{ color: "#ef4444" }}>
+                    <th style={{ paddingBottom: 6 }}>ID</th><th>USERNAME</th><th>ROLE</th><th>JOINED</th><th>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminData.users.map(u => (
+                    <tr key={u.id} style={{ borderBottom: "1px solid #3f1111" }}>
+                      <td style={{ padding: "4px 0" }}>{u.id}</td>
+                      <td style={{ color: "#fff" }}>{u.username}</td>
+                      <td><span style={{ padding: "2px 4px", background: u.role === "admin" ? "#991b1b" : "#450a0a", borderRadius: 2 }}>{u.role?.toUpperCase() || 'USER'}</span></td>
+                      <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                      <td>
+                        <button onClick={() => toggleRole(u)} disabled={u.id === user.id} style={{ background: "transparent", border: "1px solid #7f1d1d", color: "#fca5a5", fontSize: 9, padding: "2px 6px", cursor: u.id === user.id ? "not-allowed" : "pointer", borderRadius: 2, marginRight: 4 }}>
+                          ROLE
+                        </button>
+                        <button onClick={() => deleteUser(u)} disabled={u.id === user.id} style={{ background: "#991b1b", border: "none", color: "#fff", fontSize: 9, padding: "3px 6px", cursor: u.id === user.id ? "not-allowed" : "pointer", borderRadius: 2 }}>
+                          DEL
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 function AnalyzerPanel({ user }) {
@@ -447,20 +593,20 @@ function AnalyzerPanel({ user }) {
 
   return (
     <div style={{ background: "#060e1a", border: "1px solid #1e3a5f", borderRadius: 4, padding: 16 }}>
-      <div style={{ fontSize: 9, letterSpacing: "0.2em", color: "#0ea5e9", marginBottom: 12, textTransform: "uppercase" }}>
+      <div style={{ fontSize: 12, letterSpacing: "0.2em", color: "#0ea5e9", marginBottom: 12, textTransform: "uppercase" }}>
         WEBSITE CARBON ANALYZER
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <input
           value={url} onChange={e => setUrl(e.target.value)}
           onKeyDown={e => e.key === "Enter" && run()}
           placeholder="https://example.com"
-          style={{ flex: 1, background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#e2e8f0", padding: "8px 12px", borderRadius: 4, fontFamily: "monospace", fontSize: 12, outline: "none" }}
+          style={{ flex: 1, minWidth: "150px", background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#e2e8f0", padding: "8px 12px", borderRadius: 4, fontFamily: "monospace", fontSize: 15, outline: "none" }}
         />
         <button onClick={run} disabled={running} style={{
-          background: running ? "#1e3a5f" : "#0ea5e9", border: "none",
-          color: running ? "#475569" : "#000", fontWeight: 700, fontSize: 11,
+          background: running ? "#1e3a5f" : "#0ea5e9", border: "none", flexShrink: 0,
+          color: running ? "#475569" : "#000", fontWeight: 700, fontSize: 14,
           padding: "8px 16px", borderRadius: 4, cursor: running ? "not-allowed" : "pointer",
           fontFamily: "monospace", letterSpacing: "0.05em"
         }}>
@@ -468,19 +614,20 @@ function AnalyzerPanel({ user }) {
         </button>
       </div>
 
+
       <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <select value={hosting} onChange={e => setHosting(e.target.value)} style={{
           background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#94a3b8",
-          padding: "5px 8px", borderRadius: 4, fontSize: 11, fontFamily: "monospace"
+          padding: "5px 8px", borderRadius: 4, fontSize: 14, fontFamily: "monospace"
         }}>
           <option value="standard">Standard Hosting</option>
           <option value="cloud">Cloud (AWS/GCP)</option>
           <option value="green">Green CDN</option>
         </select>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 10, color: "#475569" }}>VISITORS/MO</span>
+          <span style={{ fontSize: 13, color: "#475569" }}>VISITORS/MO</span>
           <input type="number" value={visitors} onChange={e => setVisitors(+e.target.value)}
-            style={{ width: 80, background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#94a3b8", padding: "5px 8px", borderRadius: 4, fontSize: 11, fontFamily: "monospace" }}
+            style={{ width: 80, background: "#0b1a2e", border: "1px solid #1e3a5f", color: "#94a3b8", padding: "5px 8px", borderRadius: 4, fontSize: 14, fontFamily: "monospace" }}
           />
         </div>
       </div>
@@ -490,7 +637,7 @@ function AnalyzerPanel({ user }) {
           <div style={{ height: 2, background: "#1e293b", borderRadius: 1, overflow: "hidden", marginBottom: 4 }}>
             <div style={{ height: "100%", width: `${progress}%`, background: "linear-gradient(90deg,#065f46,#0ea5e9)", transition: "width 0.4s" }} />
           </div>
-          <div style={{ fontSize: 10, color: "#475569", fontFamily: "monospace" }}>{status}</div>
+          <div style={{ fontSize: 13, color: "#475569", fontFamily: "monospace" }}>{status}</div>
         </div>
       )}
 
@@ -503,12 +650,12 @@ function AnalyzerPanel({ user }) {
               display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
               boxShadow: `0 0 16px ${gradeColor(result.grade)}33`
             }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: gradeColor(result.grade), fontFamily: "monospace", lineHeight: 1 }}>{result.gpv.toFixed(2)}</div>
-              <div style={{ fontSize: 8, color: "#475569", letterSpacing: "0.1em" }}>gCO₂/VIEW</div>
+              <div style={{ fontSize: 23, fontWeight: 700, color: gradeColor(result.grade), fontFamily: "monospace", lineHeight: 1 }}>{result.gpv.toFixed(2)}</div>
+              <div style={{ fontSize: 11, color: "#475569", letterSpacing: "0.1em" }}>gCO₂/VIEW</div>
             </div>
             <div style={{ flex: 1 }}>
               {geoData && (
-                <div style={{ fontSize: 10, color: "#475569", marginBottom: 4, fontFamily: "monospace" }}>
+                <div style={{ fontSize: 13, color: "#475569", marginBottom: 4, fontFamily: "monospace" }}>
                   📍 {geoData.country} &nbsp;·&nbsp;
                   <span style={{ color: ciColor(geoData.ci) }}>{geoData.ci} gCO₂/kWh</span>
                   &nbsp;·&nbsp;
@@ -517,22 +664,22 @@ function AnalyzerPanel({ user }) {
                   </span>
                 </div>
               )}
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>
                 {result.grade === "A" ? "🌿 Excellent — very clean site" :
                  result.grade === "B" ? "✅ Good — above average" :
                  result.grade === "C" ? "⚠ Average — room to improve" :
                  result.grade === "D" ? "🔶 Below average" : "🔴 High emissions"}
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 10, padding: "2px 10px", borderRadius: 3, fontFamily: "monospace", background: `${gradeColor(result.grade)}22`, color: gradeColor(result.grade), border: `1px solid ${gradeColor(result.grade)}44` }}>
+                <span style={{ fontSize: 13, padding: "2px 10px", borderRadius: 3, fontFamily: "monospace", background: `${gradeColor(result.grade)}22`, color: gradeColor(result.grade), border: `1px solid ${gradeColor(result.grade)}44` }}>
                   GRADE {result.grade}
                 </span>
                 {result.isGreen && (
-                  <span style={{ fontSize: 10, padding: "2px 10px", borderRadius: 3, background: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)" }}>
+                  <span style={{ fontSize: 13, padding: "2px 10px", borderRadius: 3, background: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)" }}>
                     🌱 GREEN HOST
                   </span>
                 )}
-                <span style={{ fontSize: 10, padding: "2px 10px", borderRadius: 3, background: "rgba(14,165,233,0.15)", color: "#38bdf8", border: "1px solid rgba(14,165,233,0.3)" }}>
+                <span style={{ fontSize: 13, padding: "2px 10px", borderRadius: 3, background: "rgba(14,165,233,0.15)", color: "#38bdf8", border: "1px solid rgba(14,165,233,0.3)" }}>
                   💾 SAVED TO DB
                 </span>
               </div>
@@ -551,18 +698,18 @@ function AnalyzerPanel({ user }) {
           </div>
 
           <div style={{ background: "#0b1a2e", border: "1px solid #1e3a5f", borderRadius: 4, padding: 12, marginBottom: 10 }}>
-            <div style={{ fontSize: 9, color: "#475569", letterSpacing: "0.15em", marginBottom: 10 }}>EMISSION SOURCES</div>
+            <div style={{ fontSize: 12, color: "#475569", letterSpacing: "0.15em", marginBottom: 10 }}>EMISSION SOURCES</div>
             {[
               { label: "Data Center", val: result.dcE, pct: result.dcE/result.totE, col: "#22c55e" },
               { label: "Network", val: result.netE, pct: result.netE/result.totE, col: "#0ea5e9" },
               { label: "Device", val: result.devE, pct: result.devE/result.totE, col: "#818cf8" },
             ].map(s => (
               <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                <div style={{ width: 80, fontSize: 10, color: "#94a3b8" }}>{s.label}</div>
+                <div style={{ width: 80, fontSize: 13, color: "#94a3b8" }}>{s.label}</div>
                 <div style={{ flex: 1, height: 4, background: "#1e293b", borderRadius: 2, overflow: "hidden" }}>
                   <div style={{ height: "100%", width: `${(s.pct*100).toFixed(1)}%`, background: s.col, borderRadius: 2, transition: "width 1s" }} />
                 </div>
-                <div style={{ width: 60, fontSize: 10, color: "#64748b", textAlign: "right", fontFamily: "monospace" }}>
+                <div style={{ width: 60, fontSize: 13, color: "#64748b", textAlign: "right", fontFamily: "monospace" }}>
                   {(s.pct*100).toFixed(0)}%
                 </div>
               </div>
@@ -576,8 +723,8 @@ function AnalyzerPanel({ user }) {
               { label: "ANNUAL VIEWS", value: (visitors*12).toLocaleString() },
             ].map(s => (
               <div key={s.label} style={{ background: "#060e1a", border: "1px solid #1e3a5f", borderRadius: 4, padding: 10, textAlign: "center" }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#22c55e", fontFamily: "monospace" }}>{s.value}</div>
-                <div style={{ fontSize: 9, color: "#475569", letterSpacing: "0.1em", marginTop: 3 }}>{s.label}</div>
+                <div style={{ fontSize: 19, fontWeight: 700, color: "#22c55e", fontFamily: "monospace" }}>{s.value}</div>
+                <div style={{ fontSize: 12, color: "#475569", letterSpacing: "0.1em", marginTop: 3 }}>{s.label}</div>
               </div>
             ))}
           </div>
@@ -589,14 +736,14 @@ function AnalyzerPanel({ user }) {
               width: "100%", padding: "10px", border: "none", borderRadius: 4,
               background: saved ? "#1e3a5f" : "#22c55e",
               color: saved ? "#475569" : "#000",
-              fontWeight: 700, fontSize: 11, cursor: saved ? "not-allowed" : "pointer",
+              fontWeight: 700, fontSize: 14, cursor: saved ? "not-allowed" : "pointer",
               fontFamily: "monospace", letterSpacing: "0.05em",
             }}
           >
             {saved ? "✅ SAVED FOR MONITORING" : "📌 SAVE SITE FOR MONITORING"}
           </button>
           {saveMsg && (
-            <div style={{ fontSize: 10, color: saved ? "#22c55e" : "#fbbf24", marginTop: 6, textAlign: "center" }}>
+            <div style={{ fontSize: 13, color: saved ? "#22c55e" : "#fbbf24", marginTop: 6, textAlign: "center" }}>
               {saveMsg}
             </div>
           )}
@@ -623,7 +770,7 @@ function RealtimeCalculator() {
         { label: "CI g/kWh", value: ci, set: setCi, min: 10, max: 900 },
       ].map(f => (
         <div key={f.label} style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#475569", marginBottom: 3 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#475569", marginBottom: 3 }}>
             <span>{f.label}</span>
             <span style={{ color: "#94a3b8", fontFamily: "monospace" }}>{f.value}</span>
           </div>
@@ -635,12 +782,12 @@ function RealtimeCalculator() {
       ))}
       <div style={{ background: "#0b1a2e", border: "1px solid #1e3a5f", borderRadius: 4, padding: 10, marginTop: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-          <span style={{ fontSize: 9, color: "#475569" }}>ENERGY USED</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#fbbf24", fontFamily: "monospace" }}>{energy.toFixed(3)} kWh</span>
+          <span style={{ fontSize: 12, color: "#475569" }}>ENERGY USED</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: "#fbbf24", fontFamily: "monospace" }}>{energy.toFixed(3)} kWh</span>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 9, color: "#475569" }}>CO₂ EMITTED</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: co2 > 0.5 ? "#ef4444" : "#22c55e", fontFamily: "monospace" }}>{co2.toFixed(3)} kg</span>
+          <span style={{ fontSize: 12, color: "#475569" }}>CO₂ EMITTED</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: co2 > 0.5 ? "#ef4444" : "#22c55e", fontFamily: "monospace" }}>{co2.toFixed(3)} kg</span>
         </div>
       </div>
     </div>
@@ -666,7 +813,7 @@ export default function App() {
   // Loading screen
   if (!authChecked) return (
     <div style={{ background: "#020917", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Courier New', monospace" }}>
-      <div style={{ color: "#475569", fontSize: 11, letterSpacing: "0.15em" }}>LOADING...</div>
+      <div style={{ color: "#475569", fontSize: 14, letterSpacing: "0.15em" }}>LOADING...</div>
     </div>
   );
 
@@ -701,19 +848,19 @@ function Dashboard({ user, onLogout }) {
   }, 1500);
 
   const S = {
-    root: { background: "#020917", minHeight: "100vh", color: "#e2e8f0", fontFamily: "'Courier New', monospace", fontSize: 12 },
+    root: { background: "#020917", minHeight: "100vh", color: "#e2e8f0", fontFamily: "'Courier New', monospace", fontSize: 15 },
     topbar: { background: "#060e1a", borderBottom: "1px solid #1e3a5f", padding: "6px 16px", display: "flex", alignItems: "center", gap: 16 },
-    logo: { fontSize: 13, fontWeight: 700, color: "#0ea5e9", letterSpacing: "0.1em", flexShrink: 0, borderRight: "1px solid #1e3a5f", paddingRight: 16 },
+    logo: { fontSize: 16, fontWeight: 700, color: "#0ea5e9", letterSpacing: "0.1em", flexShrink: 0, borderRight: "1px solid #1e3a5f", paddingRight: 16 },
     ticker: { display: "flex", alignItems: "center", gap: 16, flex: 1, overflow: "hidden" },
-    timebox: { fontSize: 10, color: "#475569", flexShrink: 0, textAlign: "right" },
+    timebox: { fontSize: 13, color: "#475569", flexShrink: 0, textAlign: "right" },
     main: { display: "grid", gridTemplateColumns: "1fr 340px", gap: 1, height: "calc(100vh - 84px)" },
     left: { display: "flex", flexDirection: "column", gap: 1, overflow: "hidden" },
     globePanel: { flex: "0 0 320px", background: "#060e1a", position: "relative", overflow: "hidden" },
     bottomLeft: { flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, overflow: "hidden" },
     panel: { background: "#060e1a", padding: 14, overflow: "auto" },
-    panelTitle: { fontSize: 9, letterSpacing: "0.2em", color: "#0ea5e9", textTransform: "uppercase", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" },
+    panelTitle: { fontSize: 12, letterSpacing: "0.2em", color: "#0ea5e9", textTransform: "uppercase", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" },
     right: { background: "#060e1a", borderLeft: "1px solid #1e3a5f", overflow: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 12 },
-    statusbar: { background: "#060e1a", borderTop: "1px solid #1e3a5f", padding: "4px 16px", display: "flex", gap: 24, fontSize: 9, color: "#475569", letterSpacing: "0.08em" },
+    statusbar: { background: "#060e1a", borderTop: "1px solid #1e3a5f", padding: "4px 16px", display: "flex", gap: 24, fontSize: 12, color: "#475569", letterSpacing: "0.08em" },
   };
 
   const now = new Date();
@@ -734,7 +881,7 @@ function Dashboard({ user, onLogout }) {
       <div style={S.topbar}>
         <div style={S.logo}>◈ CLOUDCARBON</div>
         <div style={S.ticker}>
-          <span style={{ fontSize: 9, color: "#0ea5e9", flexShrink: 0, letterSpacing: "0.1em" }}>LIVE</span>
+          <span style={{ fontSize: 12, color: "#0ea5e9", flexShrink: 0, letterSpacing: "0.1em" }}>LIVE</span>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0, animation: "blink 1s infinite", display: "inline-block" }} />
           <Ticker items={tickerData} />
         </div>
@@ -745,12 +892,15 @@ function Dashboard({ user, onLogout }) {
             <div style={{ color: "#22c55e" }}>UPTIME {uptime}s</div>
           </div>
           <div style={{ borderLeft: "1px solid #1e3a5f", paddingLeft: 10, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
-            <span style={{ fontSize: 9, color: "#64748b" }}>
+            <span style={{ fontSize: 12, color: "#64748b", display: "flex", alignItems: "center", gap: 6 }}>
               👤 <span style={{ color: "#e2e8f0" }}>{user.username}</span>
+              {user.role === 'admin' && (
+                <span style={{ background: "#ef4444", color: "#fff", padding: "2px 6px", borderRadius: 3, fontSize: 11, fontWeight: "bold" }}>ADMIN</span>
+              )}
             </span>
             <button onClick={onLogout} style={{
               background: "#ef4444", border: "none", color: "#fff",
-              fontWeight: 700, fontSize: 8, padding: "2px 8px",
+              fontWeight: 700, fontSize: 11, padding: "2px 8px",
               borderRadius: 3, cursor: "pointer", fontFamily: "monospace",
               letterSpacing: "0.05em",
             }}>LOGOUT</button>
@@ -764,10 +914,10 @@ function Dashboard({ user, onLogout }) {
           {/* GLOBE */}
           <div style={S.globePanel}>
             <div style={{ position: "absolute", top: 10, left: 14, zIndex: 2 }}>
-              <div style={{ fontSize: 9, color: "#0ea5e9", letterSpacing: "0.2em" }}>GLOBAL CARBON INTENSITY MAP</div>
+              <div style={{ fontSize: 12, color: "#0ea5e9", letterSpacing: "0.2em" }}>GLOBAL CARBON INTENSITY MAP</div>
               <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
                 {[["#22c55e","<200 CLEAN"],["#fbbf24","200-400 MOD"],["#fb923c","400-600 HIGH"],["#ef4444",">600 CRITICAL"]].map(([c,l]) => (
-                  <span key={l} style={{ fontSize: 8, color: c, display: "flex", alignItems: "center", gap: 4 }}>
+                  <span key={l} style={{ fontSize: 11, color: c, display: "flex", alignItems: "center", gap: 4 }}>
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: c, display: "inline-block" }} />{l}
                   </span>
                 ))}
@@ -789,7 +939,7 @@ function Dashboard({ user, onLogout }) {
                 <MetricCard label="COAL GLOBAL" value="8.3 GtCO₂" color="#ef4444" sub="Annual 2024" />
                 <MetricCard label="RENEWABLES" value="30.3%" color="#22c55e" sub="Global share" />
               </div>
-              <div style={{ fontSize: 9, color: "#0ea5e9", letterSpacing: "0.15em", marginBottom: 8 }}>REAL-TIME CO₂ / PAGE VIEW</div>
+              <div style={{ fontSize: 12, color: "#0ea5e9", letterSpacing: "0.15em", marginBottom: 8 }}>REAL-TIME CO₂ / PAGE VIEW</div>
               <div style={{ height: 80 }}>
                 {chartLoaded && <RealtimeChart data={co2History} />}
               </div>
@@ -813,18 +963,18 @@ function Dashboard({ user, onLogout }) {
               ].map(h => (
                 <div key={h.label} style={{ background: "#0b1a2e", border: `1px solid ${h.color}33`, borderRadius: 4, padding: 10, marginBottom: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ fontSize: 10, color: h.color, fontWeight: 700 }}>{h.icon} {h.label}</span>
-                    <span style={{ fontSize: 10, color: h.color }}>{h.co2}</span>
+                    <span style={{ fontSize: 13, color: h.color, fontWeight: 700 }}>{h.icon} {h.label}</span>
+                    <span style={{ fontSize: 13, color: h.color }}>{h.co2}</span>
                   </div>
-                  <div style={{ fontSize: 9, color: "#475569" }}>Utilization: <span style={{ color: h.color }}>{h.util}</span></div>
+                  <div style={{ fontSize: 12, color: "#475569" }}>Utilization: <span style={{ color: h.color }}>{h.util}</span></div>
                   <div style={{ height: 3, background: "#1e293b", borderRadius: 2, marginTop: 6, overflow: "hidden" }}>
                     <div style={{ height: "100%", width: h.util.split("-")[1] || "75%", background: h.color, borderRadius: 2 }} />
                   </div>
                 </div>
               ))}
-              <div style={{ fontSize: 9, color: "#0ea5e9", letterSpacing: "0.15em", margin: "12px 0 8px" }}>CLOUD BENEFITS</div>
+              <div style={{ fontSize: 12, color: "#0ea5e9", letterSpacing: "0.15em", margin: "12px 0 8px" }}>CLOUD BENEFITS</div>
               {["Virtualization efficiency", "Elastic auto-scaling", "Renewable energy investments", "Optimized cooling (PUE < 1.2)"].map(b => (
-                <div key={b} style={{ fontSize: 10, color: "#94a3b8", padding: "3px 0", borderBottom: "1px solid #0b1a2e" }}>
+                <div key={b} style={{ fontSize: 13, color: "#94a3b8", padding: "3px 0", borderBottom: "1px solid #0b1a2e" }}>
                   <span style={{ color: "#22c55e", marginRight: 6 }}>✓</span>{b}
                 </div>
               ))}
@@ -839,12 +989,15 @@ function Dashboard({ user, onLogout }) {
 
         {/* RIGHT COLUMN */}
         <div style={S.right}>
-          <div style={{ fontSize: 9, color: "#0ea5e9", letterSpacing: "0.15em", borderBottom: "1px solid #1e3a5f", paddingBottom: 10 }}>
+          <div style={{ fontSize: 12, color: "#0ea5e9", letterSpacing: "0.15em", borderBottom: "1px solid #1e3a5f", paddingBottom: 10 }}>
             SUSTAINABILITY TERMINAL v2.0
           </div>
           <AnalyzerPanel user={user} />
+          
+          {user.role === 'admin' ? <AdminPanel user={user} /> : <UserHistoryPanel />}
+
           <div style={{ marginTop: "auto", padding: "12px 0", borderTop: "1px solid #1e3a5f" }}>
-            <div style={{ fontSize: 9, color: "#475569", letterSpacing: "0.1em", marginBottom: 8 }}>SYSTEM INFO</div>
+            <div style={{ fontSize: 12, color: "#475569", letterSpacing: "0.1em", marginBottom: 8 }}>SYSTEM INFO</div>
             {[
               ["HOST", "AWS EC2 Ubuntu 24.04"],
               ["SERVER", "Nginx 1.24"],
@@ -852,7 +1005,7 @@ function Dashboard({ user, onLogout }) {
               ["DATA", "IEA / Ember 2024"],
               ["USER", user.username],
             ].map(([k,v]) => (
-              <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 9, padding: "3px 0", borderBottom: "1px solid #0b1a2e" }}>
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0", borderBottom: "1px solid #0b1a2e" }}>
                 <span style={{ color: "#475569" }}>{k}</span>
                 <span style={{ color: "#64748b" }}>{v}</span>
               </div>

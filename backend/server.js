@@ -40,8 +40,11 @@ db.serialize(() => {
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     email TEXT UNIQUE,
+    role TEXT DEFAULT 'user',
     created_at TEXT DEFAULT (datetime('now'))
-  )`);
+  )`, () => {
+    db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'`, () => {});
+  });
   db.run(`CREATE TABLE IF NOT EXISTS analyses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -80,21 +83,22 @@ function auth(req, res, next) {
   const token = header.split(' ')[1];
   try {
     const d = jwt.verify(token, JWT_SECRET);
-    req.userId = d.userId; req.username = d.username; next();
+    req.userId = d.userId; req.username = d.username; req.role = d.role; next();
   } catch { res.status(401).json({ error: 'Invalid or expired token' }); }
 }
 
 // ── AUTH ──────────────────────────────────────────────────────────────────
 app.post('/api/auth/register', async (req, res) => {
-  const { username, password, email } = req.body;
+  const { username, password, email, role: requestedRole } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   if (username.length < 3) return res.status(400).json({ error: 'Username min 3 characters' });
   if (password.length < 6) return res.status(400).json({ error: 'Password min 6 characters' });
   try {
     const hashed = await bcrypt.hash(password, 12);
-    const r = await dbRun('INSERT INTO users (username, password, email) VALUES (?,?,?)', [username.trim(), hashed, email?.trim()||null]);
-    const token = jwt.sign({ userId: r.lastID, username: username.trim() }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ message: 'Account created', token, user: { id: r.lastID, username: username.trim() } });
+    const role = requestedRole === 'admin' ? 'admin' : 'user';
+    const r = await dbRun('INSERT INTO users (username, password, email, role) VALUES (?,?,?,?)', [username.trim(), hashed, email?.trim()||null, role]);
+    const token = jwt.sign({ userId: r.lastID, username: username.trim(), role }, JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ message: 'Account created', token, user: { id: r.lastID, username: username.trim(), role } });
   } catch (err) {
     if (err.message.includes('UNIQUE')) res.status(409).json({ error: 'Username already exists' });
     else res.status(500).json({ error: 'Registration failed' });
@@ -109,17 +113,69 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: 'Invalid username or password' });
-    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ message: 'Login successful', token, user: { id: user.id, username: user.username, created_at: user.created_at } });
+    const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ message: 'Login successful', token, user: { id: user.id, username: user.username, role: user.role, created_at: user.created_at } });
   } catch { res.status(500).json({ error: 'Login failed' }); }
 });
 
 app.get('/api/auth/me', auth, async (req, res) => {
   try {
-    const user = await dbGet('SELECT id, username, email, created_at FROM users WHERE id = ?', [req.userId]);
+    const user = await dbGet('SELECT id, username, email, role, created_at FROM users WHERE id = ?', [req.userId]);
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user });
   } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+// ── ADMIN ─────────────────────────────────────────────────────────────────
+app.get('/api/admin/users', auth, async (req, res) => {
+  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden: Admin only' });
+  try {
+    const users = await dbAll('SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC');
+    res.json({ users });
+  } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.patch('/api/admin/users/:id/role', auth, async (req, res) => {
+  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const { role } = req.body;
+    if (!['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    await dbRun('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
+    res.json({ message: 'Role updated' });
+  } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.delete('/api/admin/users/:id', auth, async (req, res) => {
+  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  try {
+    await dbRun('DELETE FROM co2_snapshots WHERE saved_site_id IN (SELECT id FROM saved_sites WHERE user_id = ?)', [req.params.id]);
+    await dbRun('DELETE FROM saved_sites WHERE user_id = ?', [req.params.id]);
+    await dbRun('DELETE FROM analyses WHERE user_id = ?', [req.params.id]);
+    await dbRun('DELETE FROM users WHERE id = ?', [req.params.id]);
+    res.json({ message: 'User deleted' });
+  } catch { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.get('/api/admin/stats', auth, async (req, res) => {
+  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const totalUsers = await dbGet('SELECT COUNT(*) as c FROM users');
+    const globalStats = await dbGet('SELECT COUNT(*) as analyses_count, SUM(annual_kg) as total_co2 FROM analyses');
+    const recentAnalyses = await dbAll(`
+      SELECT url, grade, analyzed_at, users.username 
+      FROM analyses 
+      JOIN users ON users.id = analyses.user_id 
+      ORDER BY analyzed_at DESC LIMIT 10
+    `);
+    res.json({ 
+      usersCount: totalUsers.c, 
+      analysesCount: globalStats.analyses_count, 
+      totalCo2: globalStats.total_co2 || 0,
+      recent: recentAnalyses 
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // ── ANALYSES ──────────────────────────────────────────────────────────────
