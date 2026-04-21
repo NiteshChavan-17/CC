@@ -879,7 +879,7 @@ function Dashboard({ user, onLogout }) {
 
       {/* TOP BAR */}
       <div style={S.topbar}>
-        <div style={S.logo}>◈ CLOUDCARBON</div>
+        <div style={S.logo}>◈ ECOCLOUD</div>
         <div style={S.ticker}>
           <span style={{ fontSize: 12, color: "#0ea5e9", flexShrink: 0, letterSpacing: "0.1em" }}>LIVE</span>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0, animation: "blink 1s infinite", display: "inline-block" }} />
@@ -1016,7 +1016,7 @@ function Dashboard({ user, onLogout }) {
 
       {/* STATUS BAR */}
       <div style={S.statusbar}>
-        <span>◈ CLOUDCARBON TERMINAL</span>
+        <span>◈ ECOCLOUD TERMINAL</span>
         <span style={{ color: "#22c55e" }}>● CONNECTED</span>
         <span>DATA: LIVE</span>
         <span>CARBON API: api.websitecarbon.com</span>

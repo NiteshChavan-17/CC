@@ -62,7 +62,7 @@ export default function AuthScreen({ onLogin }) {
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: 36 }}>
           <div style={{ fontSize: 31, fontWeight: 700, color: "#0ea5e9", letterSpacing: "0.1em" }}>
-            ◈ CLOUDCARBON
+            ◈ ECOCLOUD
           </div>
           <div style={{ fontSize: 13, color: "#475569", letterSpacing: "0.2em", marginTop: 6 }}>
             SUSTAINABLE CLOUD INFRASTRUCTURE TERMINAL

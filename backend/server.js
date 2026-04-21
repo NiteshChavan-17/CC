@@ -1,271 +1,542 @@
+require('dotenv').config();
 const express  = require('express');
 const cors     = require('cors');
 const bcrypt   = require('bcrypt');
 const jwt      = require('jsonwebtoken');
-const sqlite3  = require('sqlite3').verbose();
-const path     = require('path');
+const mongoose = require('mongoose');
 
 const app        = express();
-const PORT       = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'cloudcarbon_secret_change_in_production';
+const PORT       = process.env.PORT       || 5000;
+const JWT_SECRET = process.env.JWT_SECRET || 'ecocloud_secret_change_in_production';
+const MONGO_URI  = process.env.MONGO_URI  || 'mongodb://localhost:27017/ecocloud';
 
+// ── Middleware ────────────────────────────────────────────────────────────
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// ── Database ──────────────────────────────────────────────────────────────
-const db = new sqlite3.Database(
-  path.join(__dirname, 'cloudcarbon.db'),
-  err => { if (err) console.error('DB error:', err); else console.log('✅ Database ready: cloudcarbon.db'); }
-);
+// ── MongoDB Connection ────────────────────────────────────────────────────
+mongoose.connect(MONGO_URI)
+  .then(() => console.log('✅ MongoDB Atlas connected successfully'))
+  .catch(err => { console.error('❌ MongoDB connection error:', err.message); process.exit(1); });
 
-function dbRun(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) { if (err) reject(err); else resolve({ lastID: this.lastID }); });
-  });
-}
-function dbGet(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => { if (err) reject(err); else resolve(row); });
-  });
-}
-function dbAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => { if (err) reject(err); else resolve(rows); });
-  });
-}
+// ══════════════════════════════════════════════════════════════════════════
+// MONGOOSE SCHEMAS & MODELS
+// ══════════════════════════════════════════════════════════════════════════
 
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    email TEXT UNIQUE,
-    role TEXT DEFAULT 'user',
-    created_at TEXT DEFAULT (datetime('now'))
-  )`, () => {
-    db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'`, () => {});
-  });
-  db.run(`CREATE TABLE IF NOT EXISTS analyses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    url TEXT NOT NULL,
-    country TEXT, country_code TEXT, ci_value REAL,
-    grams_per_view REAL, annual_kg REAL, grade TEXT,
-    page_size_kb INTEGER, is_green INTEGER DEFAULT 0,
-    data_source TEXT, analyzed_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  )`);
-  db.run(`CREATE TABLE IF NOT EXISTS saved_sites (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL, url TEXT NOT NULL, nickname TEXT,
-    saved_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(user_id, url), FOREIGN KEY (user_id) REFERENCES users(id)
-  )`);
-  db.run(`CREATE TABLE IF NOT EXISTS co2_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    saved_site_id INTEGER NOT NULL,
-    grams_per_view REAL, ci_value REAL, grade TEXT,
-    recorded_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (saved_site_id) REFERENCES saved_sites(id)
-  )`);
-  db.run(`CREATE TABLE IF NOT EXISTS ci_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    country_code TEXT NOT NULL, ci_value REAL NOT NULL,
-    logged_at TEXT DEFAULT (datetime('now'))
-  )`);
-  console.log('✅ All tables ready');
-});
+// ── User Schema ───────────────────────────────────────────────────────────
+const userSchema = new mongoose.Schema({
+  username:   { type: String, required: true, unique: true, trim: true, minlength: 3 },
+  password:   { type: String, required: true },
+  email:      { type: String, unique: true, sparse: true, trim: true },
+  role:       { type: String, enum: ['user', 'admin'], default: 'user' },
+  isActive:   { type: Boolean, default: true },
+}, { timestamps: true });
+
+const User = mongoose.model('User', userSchema);
+
+// ── Analysis Schema ───────────────────────────────────────────────────────
+const analysisSchema = new mongoose.Schema({
+  userId:       { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  url:          { type: String, required: true },
+  country:      String,
+  countryCode:  String,
+  ciValue:      Number,
+  gramsPerView: Number,
+  annualKg:     Number,
+  grade:        String,
+  pageSizeKb:   Number,
+  isGreen:      { type: Boolean, default: false },
+  dataSource:   String,
+}, { timestamps: true });
+
+const Analysis = mongoose.model('Analysis', analysisSchema);
+
+// ── Saved Site Schema ─────────────────────────────────────────────────────
+const savedSiteSchema = new mongoose.Schema({
+  userId:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  url:      { type: String, required: true },
+  nickname: String,
+}, { timestamps: true });
+
+// Compound unique index — one user can't save same URL twice
+savedSiteSchema.index({ userId: 1, url: 1 }, { unique: true });
+
+const SavedSite = mongoose.model('SavedSite', savedSiteSchema);
+
+// ── CO2 Snapshot Schema ───────────────────────────────────────────────────
+const snapshotSchema = new mongoose.Schema({
+  savedSiteId:  { type: mongoose.Schema.Types.ObjectId, ref: 'SavedSite', required: true },
+  gramsPerView: Number,
+  ciValue:      Number,
+  grade:        String,
+}, { timestamps: true });
+
+const Snapshot = mongoose.model('Snapshot', snapshotSchema);
+
+// ── CI Log Schema ─────────────────────────────────────────────────────────
+const ciLogSchema = new mongoose.Schema({
+  countryCode: { type: String, required: true, uppercase: true },
+  ciValue:     { type: Number, required: true },
+}, { timestamps: true });
+
+const CiLog = mongoose.model('CiLog', ciLogSchema);
+
+// ══════════════════════════════════════════════════════════════════════════
+// MIDDLEWARE
+// ══════════════════════════════════════════════════════════════════════════
 
 // ── Auth middleware ───────────────────────────────────────────────────────
 function auth(req, res, next) {
   const header = req.headers['authorization'];
   if (!header) return res.status(401).json({ error: 'No token provided' });
   const token = header.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Invalid token format' });
   try {
-    const d = jwt.verify(token, JWT_SECRET);
-    req.userId = d.userId; req.username = d.username; req.role = d.role; next();
-  } catch { res.status(401).json({ error: 'Invalid or expired token' }); }
+    const decoded  = jwt.verify(token, JWT_SECRET);
+    req.userId     = decoded.userId;
+    req.username   = decoded.username;
+    req.role       = decoded.role;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
 }
 
-// ── AUTH ──────────────────────────────────────────────────────────────────
+// ── Admin middleware ──────────────────────────────────────────────────────
+function adminOnly(req, res, next) {
+  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden: Admin only' });
+  next();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// AUTH ROUTES
+// ══════════════════════════════════════════════════════════════════════════
+
+// POST /api/auth/register
 app.post('/api/auth/register', async (req, res) => {
   const { username, password, email, role: requestedRole } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-  if (username.length < 3) return res.status(400).json({ error: 'Username min 3 characters' });
-  if (password.length < 6) return res.status(400).json({ error: 'Password min 6 characters' });
+
+  if (!username || !password)
+    return res.status(400).json({ error: 'Username and password required' });
+  if (username.length < 3)
+    return res.status(400).json({ error: 'Username min 3 characters' });
+  if (password.length < 6)
+    return res.status(400).json({ error: 'Password min 6 characters' });
+
   try {
     const hashed = await bcrypt.hash(password, 12);
+
+    // Only allow admin role if explicitly requested
+    // In production you would remove this and assign admin manually
     const role = requestedRole === 'admin' ? 'admin' : 'user';
-    const r = await dbRun('INSERT INTO users (username, password, email, role) VALUES (?,?,?,?)', [username.trim(), hashed, email?.trim()||null, role]);
-    const token = jwt.sign({ userId: r.lastID, username: username.trim(), role }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ message: 'Account created', token, user: { id: r.lastID, username: username.trim(), role } });
+
+    const user = await User.create({
+      username: username.trim(),
+      password: hashed,
+      email:    email?.trim() || undefined,
+      role,
+    });
+
+    const token = jwt.sign(
+      { userId: user._id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.status(201).json({
+      message: 'Account created successfully',
+      token,
+      user: { id: user._id, username: user.username, role: user.role },
+    });
   } catch (err) {
-    if (err.message.includes('UNIQUE')) res.status(409).json({ error: 'Username already exists' });
-    else res.status(500).json({ error: 'Registration failed' });
+    if (err.code === 11000)
+      res.status(409).json({ error: 'Username or email already exists' });
+    else
+      res.status(500).json({ error: 'Registration failed: ' + err.message });
   }
 });
 
+// POST /api/auth/login
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+  if (!username || !password)
+    return res.status(400).json({ error: 'Username and password required' });
+
   try {
-    const user = await dbGet('SELECT * FROM users WHERE username = ?', [username.trim()]);
+    const user = await User.findOne({ username: username.trim() });
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
+
+    if (!user.isActive)
+      return res.status(403).json({ error: 'Account has been deactivated' });
+
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: 'Invalid username or password' });
-    const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ message: 'Login successful', token, user: { id: user.id, username: user.username, role: user.role, created_at: user.created_at } });
-  } catch { res.status(500).json({ error: 'Login failed' }); }
+
+    const token = jwt.sign(
+      { userId: user._id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      message: 'Login successful',
+      token,
+      user: {
+        id:         user._id,
+        username:   user.username,
+        role:       user.role,
+        created_at: user.createdAt,
+      },
+    });
+  } catch {
+    res.status(500).json({ error: 'Login failed' });
+  }
 });
 
+// GET /api/auth/me
 app.get('/api/auth/me', auth, async (req, res) => {
   try {
-    const user = await dbGet('SELECT id, username, email, role, created_at FROM users WHERE id = ?', [req.userId]);
+    const user = await User.findById(req.userId).select('-password');
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user });
-  } catch { res.status(500).json({ error: 'Server error' }); }
-});
-
-// ── ADMIN ─────────────────────────────────────────────────────────────────
-app.get('/api/admin/users', auth, async (req, res) => {
-  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden: Admin only' });
-  try {
-    const users = await dbAll('SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC');
-    res.json({ users });
-  } catch { res.status(500).json({ error: 'Server error' }); }
-});
-
-app.patch('/api/admin/users/:id/role', auth, async (req, res) => {
-  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  try {
-    const { role } = req.body;
-    if (!['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
-    await dbRun('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
-    res.json({ message: 'Role updated' });
-  } catch { res.status(500).json({ error: 'Server error' }); }
-});
-
-app.delete('/api/admin/users/:id', auth, async (req, res) => {
-  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  try {
-    await dbRun('DELETE FROM co2_snapshots WHERE saved_site_id IN (SELECT id FROM saved_sites WHERE user_id = ?)', [req.params.id]);
-    await dbRun('DELETE FROM saved_sites WHERE user_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM analyses WHERE user_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM users WHERE id = ?', [req.params.id]);
-    res.json({ message: 'User deleted' });
-  } catch { res.status(500).json({ error: 'Server error' }); }
-});
-
-app.get('/api/admin/stats', auth, async (req, res) => {
-  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  try {
-    const totalUsers = await dbGet('SELECT COUNT(*) as c FROM users');
-    const globalStats = await dbGet('SELECT COUNT(*) as analyses_count, SUM(annual_kg) as total_co2 FROM analyses');
-    const recentAnalyses = await dbAll(`
-      SELECT url, grade, analyzed_at, users.username 
-      FROM analyses 
-      JOIN users ON users.id = analyses.user_id 
-      ORDER BY analyzed_at DESC LIMIT 10
-    `);
-    res.json({ 
-      usersCount: totalUsers.c, 
-      analysesCount: globalStats.analyses_count, 
-      totalCo2: globalStats.total_co2 || 0,
-      recent: recentAnalyses 
-    });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// ── ANALYSES ──────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// ADMIN ROUTES
+// ══════════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/users — list all users
+app.get('/api/admin/users', auth, adminOnly, async (req, res) => {
+  try {
+    const users = await User.find()
+      .select('-password')
+      .sort({ createdAt: -1 });
+    res.json({ users });
+  } catch {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PATCH /api/admin/users/:id/role — change a user's role
+app.patch('/api/admin/users/:id/role', auth, adminOnly, async (req, res) => {
+  const { role } = req.body;
+  if (!['user', 'admin'].includes(role))
+    return res.status(400).json({ error: 'Invalid role. Must be user or admin' });
+  try {
+    await User.findByIdAndUpdate(req.params.id, { role });
+    res.json({ message: `Role updated to ${role}` });
+  } catch {
+    res.status(500).json({ error: 'Could not update role' });
+  }
+});
+
+// PATCH /api/admin/users/:id/status — activate / deactivate a user
+app.patch('/api/admin/users/:id/status', auth, adminOnly, async (req, res) => {
+  const { isActive } = req.body;
+  try {
+    await User.findByIdAndUpdate(req.params.id, { isActive });
+    res.json({ message: `User ${isActive ? 'activated' : 'deactivated'}` });
+  } catch {
+    res.status(500).json({ error: 'Could not update status' });
+  }
+});
+
+// DELETE /api/admin/users/:id — delete a user and all their data
+app.delete('/api/admin/users/:id', auth, adminOnly, async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    // Delete all snapshots for this user's saved sites
+    const savedSites = await SavedSite.find({ userId });
+    const siteIds = savedSites.map(s => s._id);
+    await Snapshot.deleteMany({ savedSiteId: { $in: siteIds } });
+
+    // Delete everything else
+    await SavedSite.deleteMany({ userId });
+    await Analysis.deleteMany({ userId });
+    await User.findByIdAndDelete(userId);
+
+    res.json({ message: 'User and all their data deleted' });
+  } catch {
+    res.status(500).json({ error: 'Could not delete user' });
+  }
+});
+
+// GET /api/admin/stats — platform-wide statistics
+app.get('/api/admin/stats', auth, adminOnly, async (req, res) => {
+  try {
+    const usersCount     = await User.countDocuments();
+    const analysesCount  = await Analysis.countDocuments();
+    const totalCo2Result = await Analysis.aggregate([
+      { $group: { _id: null, total: { $sum: '$annualKg' } } }
+    ]);
+    const totalCo2 = totalCo2Result[0]?.total || 0;
+
+    // Most analyzed sites
+    const topSites = await Analysis.aggregate([
+      { $group: { _id: '$url', count: { $sum: 1 }, avgGrade: { $first: '$grade' } } },
+      { $sort: { count: -1 } },
+      { $limit: 5 },
+    ]);
+
+    // Grade distribution across all users
+    const gradeDistribution = await Analysis.aggregate([
+      { $group: { _id: '$grade', count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]);
+
+    // Recent analyses with username
+    const recent = await Analysis.find()
+      .populate('userId', 'username')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    res.json({
+      usersCount,
+      analysesCount,
+      totalCo2: parseFloat(totalCo2.toFixed(2)),
+      topSites,
+      gradeDistribution,
+      recent: recent.map(a => ({
+        url:       a.url,
+        grade:     a.grade,
+        username:  a.userId?.username || 'unknown',
+        analyzedAt: a.createdAt,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error: ' + err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// ANALYSIS ROUTES
+// ══════════════════════════════════════════════════════════════════════════
+
+// POST /api/analyses — save a new analysis
 app.post('/api/analyses', auth, async (req, res) => {
-  const { url, country, country_code, ci_value, grams_per_view, annual_kg, grade, page_size_kb, is_green, data_source } = req.body;
+  const {
+    url, country, country_code, ci_value, grams_per_view,
+    annual_kg, grade, page_size_kb, is_green, data_source
+  } = req.body;
+
   if (!url) return res.status(400).json({ error: 'URL required' });
+
   try {
-    const r = await dbRun(
-      `INSERT INTO analyses (user_id,url,country,country_code,ci_value,grams_per_view,annual_kg,grade,page_size_kb,is_green,data_source)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      [req.userId, url, country, country_code, ci_value, grams_per_view, annual_kg, grade, page_size_kb, is_green?1:0, data_source]
-    );
-    const saved = await dbGet('SELECT id FROM saved_sites WHERE user_id=? AND url=?', [req.userId, url]);
-    if (saved) await dbRun('INSERT INTO co2_snapshots (saved_site_id,grams_per_view,ci_value,grade) VALUES (?,?,?,?)', [saved.id, grams_per_view, ci_value, grade]);
-    res.status(201).json({ id: r.lastID, message: 'Analysis saved' });
-  } catch { res.status(500).json({ error: 'Could not save analysis' }); }
+    const analysis = await Analysis.create({
+      userId:       req.userId,
+      url,
+      country,
+      countryCode:  country_code,
+      ciValue:      ci_value,
+      gramsPerView: grams_per_view,
+      annualKg:     annual_kg,
+      grade,
+      pageSizeKb:   page_size_kb,
+      isGreen:      is_green || false,
+      dataSource:   data_source,
+    });
+
+    // If this URL is a saved site, add a CO2 snapshot for trend tracking
+    const savedSite = await SavedSite.findOne({ userId: req.userId, url });
+    if (savedSite) {
+      await Snapshot.create({
+        savedSiteId:  savedSite._id,
+        gramsPerView: grams_per_view,
+        ciValue:      ci_value,
+        grade,
+      });
+    }
+
+    res.status(201).json({ id: analysis._id, message: 'Analysis saved' });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not save analysis' });
+  }
 });
 
+// GET /api/analyses — get user's analysis history
 app.get('/api/analyses', auth, async (req, res) => {
+  const limit = parseInt(req.query.limit) || 20;
   try {
-    const rows = await dbAll('SELECT * FROM analyses WHERE user_id=? ORDER BY analyzed_at DESC LIMIT ?', [req.userId, parseInt(req.query.limit)||20]);
-    res.json({ analyses: rows });
-  } catch { res.status(500).json({ error: 'Could not fetch analyses' }); }
+    const analyses = await Analysis.find({ userId: req.userId })
+      .sort({ createdAt: -1 })
+      .limit(limit);
+    res.json({ analyses });
+  } catch {
+    res.status(500).json({ error: 'Could not fetch analyses' });
+  }
 });
 
+// GET /api/analyses/stats — user's personal stats
 app.get('/api/analyses/stats', auth, async (req, res) => {
   try {
-    const stats = await dbGet(
-      `SELECT COUNT(*) AS total_analyses, AVG(grams_per_view) AS avg_grams,
-       MIN(grams_per_view) AS best_grams, MAX(grams_per_view) AS worst_grams,
-       SUM(annual_kg) AS total_annual_kg, COUNT(DISTINCT url) AS unique_sites
-       FROM analyses WHERE user_id=?`, [req.userId]
-    );
-    const gradeCount = await dbAll('SELECT grade, COUNT(*) as count FROM analyses WHERE user_id=? GROUP BY grade ORDER BY grade', [req.userId]);
-    res.json({ stats, gradeCount });
-  } catch { res.status(500).json({ error: 'Could not fetch stats' }); }
+    const result = await Analysis.aggregate([
+      { $match: { userId: new mongoose.Types.ObjectId(req.userId) } },
+      {
+        $group: {
+          _id:            null,
+          total_analyses: { $sum: 1 },
+          avg_grams:      { $avg: '$gramsPerView' },
+          best_grams:     { $min: '$gramsPerView' },
+          worst_grams:    { $max: '$gramsPerView' },
+          total_annual_kg:{ $sum: '$annualKg' },
+          unique_urls:    { $addToSet: '$url' },
+        }
+      },
+      {
+        $project: {
+          total_analyses:  1,
+          avg_grams:       1,
+          best_grams:      1,
+          worst_grams:     1,
+          total_annual_kg: 1,
+          unique_sites:    { $size: '$unique_urls' },
+        }
+      }
+    ]);
+
+    const gradeCount = await Analysis.aggregate([
+      { $match: { userId: new mongoose.Types.ObjectId(req.userId) } },
+      { $group: { _id: '$grade', count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]);
+
+    res.json({
+      stats:      result[0] || {},
+      gradeCount: gradeCount.map(g => ({ grade: g._id, count: g.count })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not fetch stats' });
+  }
 });
 
-// ── SAVED SITES ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// SAVED SITES ROUTES
+// ══════════════════════════════════════════════════════════════════════════
+
+// POST /api/saved-sites
 app.post('/api/saved-sites', auth, async (req, res) => {
   const { url, nickname } = req.body;
   if (!url) return res.status(400).json({ error: 'URL required' });
   try {
-    const r = await dbRun('INSERT INTO saved_sites (user_id,url,nickname) VALUES (?,?,?)', [req.userId, url, nickname||url]);
-    res.status(201).json({ id: r.lastID, message: 'Site saved' });
+    const site = await SavedSite.create({
+      userId:   req.userId,
+      url,
+      nickname: nickname || url,
+    });
+    res.status(201).json({ id: site._id, message: 'Site saved for monitoring' });
   } catch (err) {
-    if (err.message.includes('UNIQUE')) res.status(409).json({ error: 'Site already saved' });
-    else res.status(500).json({ error: 'Could not save site' });
+    if (err.code === 11000)
+      res.status(409).json({ error: 'Site already saved' });
+    else
+      res.status(500).json({ error: 'Could not save site' });
   }
 });
 
+// GET /api/saved-sites — list with latest snapshot info
 app.get('/api/saved-sites', auth, async (req, res) => {
   try {
-    const sites = await dbAll(
-      `SELECT ss.*,
-        (SELECT grams_per_view FROM co2_snapshots WHERE saved_site_id=ss.id ORDER BY recorded_at DESC LIMIT 1) AS latest_grams,
-        (SELECT grade FROM co2_snapshots WHERE saved_site_id=ss.id ORDER BY recorded_at DESC LIMIT 1) AS latest_grade,
-        (SELECT COUNT(*) FROM co2_snapshots WHERE saved_site_id=ss.id) AS snapshot_count
-       FROM saved_sites ss WHERE ss.user_id=? ORDER BY ss.saved_at DESC`, [req.userId]
-    );
-    res.json({ sites });
-  } catch { res.status(500).json({ error: 'Could not fetch sites' }); }
+    const sites = await SavedSite.find({ userId: req.userId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Attach latest snapshot to each site
+    const sitesWithSnapshots = await Promise.all(sites.map(async site => {
+      const latest = await Snapshot.findOne({ savedSiteId: site._id })
+        .sort({ createdAt: -1 });
+      const count = await Snapshot.countDocuments({ savedSiteId: site._id });
+      return {
+        ...site,
+        latest_grams: latest?.gramsPerView || null,
+        latest_grade: latest?.grade        || null,
+        snapshot_count: count,
+      };
+    }));
+
+    res.json({ sites: sitesWithSnapshots });
+  } catch {
+    res.status(500).json({ error: 'Could not fetch saved sites' });
+  }
 });
 
+// DELETE /api/saved-sites/:id
 app.delete('/api/saved-sites/:id', auth, async (req, res) => {
   try {
-    const site = await dbGet('SELECT * FROM saved_sites WHERE id=? AND user_id=?', [req.params.id, req.userId]);
+    const site = await SavedSite.findOne({ _id: req.params.id, userId: req.userId });
     if (!site) return res.status(404).json({ error: 'Site not found' });
-    await dbRun('DELETE FROM co2_snapshots WHERE saved_site_id=?', [req.params.id]);
-    await dbRun('DELETE FROM saved_sites WHERE id=?', [req.params.id]);
+
+    await Snapshot.deleteMany({ savedSiteId: site._id });
+    await SavedSite.findByIdAndDelete(site._id);
+
     res.json({ message: 'Site removed' });
-  } catch { res.status(500).json({ error: 'Could not delete site' }); }
+  } catch {
+    res.status(500).json({ error: 'Could not delete site' });
+  }
 });
 
+// GET /api/saved-sites/:id/trend
 app.get('/api/saved-sites/:id/trend', auth, async (req, res) => {
   try {
-    const site = await dbGet('SELECT * FROM saved_sites WHERE id=? AND user_id=?', [req.params.id, req.userId]);
+    const site = await SavedSite.findOne({ _id: req.params.id, userId: req.userId });
     if (!site) return res.status(404).json({ error: 'Site not found' });
-    const snapshots = await dbAll(
-      'SELECT grams_per_view,ci_value,grade,recorded_at FROM co2_snapshots WHERE saved_site_id=? ORDER BY recorded_at ASC LIMIT 50',
-      [req.params.id]
-    );
+
+    const snapshots = await Snapshot.find({ savedSiteId: site._id })
+      .sort({ createdAt: 1 })
+      .limit(50);
+
     res.json({ site, snapshots });
-  } catch { res.status(500).json({ error: 'Could not fetch trend' }); }
+  } catch {
+    res.status(500).json({ error: 'Could not fetch trend' });
+  }
 });
 
-// ── HEALTH ────────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+// ══════════════════════════════════════════════════════════════════════════
+// CI LOG ROUTES
+// ══════════════════════════════════════════════════════════════════════════
 
+// POST /api/ci-log
+app.post('/api/ci-log', auth, async (req, res) => {
+  const { readings } = req.body;
+  if (!Array.isArray(readings))
+    return res.status(400).json({ error: 'readings must be an array' });
+  try {
+    await CiLog.insertMany(readings.map(r => ({
+      countryCode: r.country_code,
+      ciValue:     r.ci_value,
+    })));
+    res.json({ message: `${readings.length} CI values logged` });
+  } catch {
+    res.status(500).json({ error: 'Could not log CI values' });
+  }
+});
+
+// GET /api/ci-log/:code
+app.get('/api/ci-log/:code', auth, async (req, res) => {
+  try {
+    const history = await CiLog.find({ countryCode: req.params.code.toUpperCase() })
+      .sort({ createdAt: -1 })
+      .limit(100);
+    res.json({ country: req.params.code.toUpperCase(), history });
+  } catch {
+    res.status(500).json({ error: 'Could not fetch CI log' });
+  }
+});
+
+// ── Health check ──────────────────────────────────────────────────────────
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    database: mongoose.connection.readyState === 1 ? 'MongoDB Connected' : 'Disconnected',
+    time: new Date().toISOString(),
+  });
+});
+
+// ── Start server ──────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`🚀 CloudCarbon backend running on http://localhost:${PORT}`);
-  console.log(`🔗 Test it: http://localhost:${PORT}/api/health`);
+  console.log(`🚀 EcoCloud backend running on http://localhost:${PORT}`);
+  console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
 });
